@@ -2,7 +2,7 @@ name: Attach Release Assets
 
 on:
   release:
-    types: [created, published]
+    types: [created]
 
 permissions:
   contents: write  # Required to upload release assets
@@ -15,11 +15,26 @@ jobs:
       - name: Get release commit SHA
         id: release
         run: |
-          # Get the commit SHA for this release tag
-          COMMIT_SHA="${{ github.event.release.target_commitish }}"
+          # Get the actual commit SHA for this release tag
+          # target_commitish can be a branch name like "main" or a commit SHA
+          TAG="${{ github.event.release.tag_name }}"
+
+          # Resolve the tag to its commit SHA
+          COMMIT_SHA=$(gh api "/repos/${{ github.repository }}/git/ref/tags/$TAG" --jq '.object.sha')
+
+          # If it's an annotated tag, we need to dereference it
+          OBJECT_TYPE=$(gh api "/repos/${{ github.repository }}/git/tags/$COMMIT_SHA" --jq '.object.type' 2>/dev/null || echo "commit")
+
+          if [ "$OBJECT_TYPE" = "commit" ]; then
+            # It's an annotated tag, get the actual commit SHA
+            COMMIT_SHA=$(gh api "/repos/${{ github.repository }}/git/tags/$COMMIT_SHA" --jq '.object.sha' 2>/dev/null || echo "$COMMIT_SHA")
+          fi
+
           echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_OUTPUT
-          echo "Release tag: ${{ github.event.release.tag_name }}"
+          echo "Release tag: $TAG"
           echo "Release commit: $COMMIT_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Find build workflow run
         id: find-run
