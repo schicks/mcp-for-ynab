@@ -1,149 +1,104 @@
-name: Build Executables
+name: Attach Release Assets
 
 on:
-  push:
-    branches: [main]
-    tags-ignore: ['**']  # Don't trigger on tag pushes to prevent loops
+  release:
+    types: [created, published]
 
-concurrency:
-  group: build
-  cancel-in-progress: false  # Let builds finish
+permissions:
+  contents: write  # Required to upload release assets
 
 jobs:
-  build:
+  attach-assets:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read  # Read-only workflow
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Generate version number
-        id: version
+      - name: Get release commit SHA
+        id: release
         run: |
-          # Get current date in UTC (YYYY.MM.DD format)
-          DATE=$(date -u +%Y.%m.%d)
-          echo "DATE=$DATE" >> $GITHUB_OUTPUT
+          # Get the commit SHA for this release tag
+          COMMIT_SHA="${{ github.event.release.target_commitish }}"
+          echo "COMMIT_SHA=$COMMIT_SHA" >> $GITHUB_OUTPUT
+          echo "Release tag: ${{ github.event.release.tag_name }}"
+          echo "Release commit: $COMMIT_SHA"
 
-          # Query GitHub API for existing releases matching today's date
-          # Use pagination to ensure we get all releases
-          MAX_BUILD=0
-          PAGE=1
-          while true; do
-            RELEASES=$(gh api "repos/${{ github.repository }}/releases?per_page=100&page=$PAGE" \
-              --jq ".[].tag_name | select(startswith(\"v$DATE\"))")
+      - name: Find build workflow run
+        id: find-run
+        run: |
+          # Find the workflow run for the build workflow at this commit
+          echo "Searching for build workflow run at commit ${{ steps.release.outputs.COMMIT_SHA }}..."
 
-            if [ -z "$RELEASES" ]; then
-              break
-            fi
+          RUN_ID=$(gh api \
+            "/repos/${{ github.repository }}/actions/workflows/build.yml/runs?head_sha=${{ steps.release.outputs.COMMIT_SHA }}&status=success" \
+            --jq '.workflow_runs[0].id')
 
-            # Extract build numbers and find max
-            while IFS= read -r release; do
-              if [ -n "$release" ]; then
-                BUILD_NUM=$(echo "$release" | sed "s/v$DATE\.//" || echo "0")
-                if [ "$BUILD_NUM" -gt "$MAX_BUILD" ] 2>/dev/null; then
-                  MAX_BUILD=$BUILD_NUM
-                fi
-              fi
-            done <<< "$RELEASES"
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "Error: No successful build workflow run found for commit ${{ steps.release.outputs.COMMIT_SHA }}"
+            echo "Make sure the build workflow has completed successfully for this commit."
+            exit 1
+          fi
 
-            PAGE=$((PAGE + 1))
-          done
-
-          # Increment and create new version
-          BUILD=$((MAX_BUILD + 1))
-          VERSION="v$DATE.$BUILD"
-
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Generated version: $VERSION"
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Found build workflow run: $RUN_ID"
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Build Linux executable
+      - name: Download Linux artifact
         run: |
-          echo "Building Linux executable..."
-          bun run build:linux
+          echo "Downloading Linux artifact from run ${{ steps.find-run.outputs.RUN_ID }}..."
+          gh run download ${{ steps.find-run.outputs.RUN_ID }} \
+            --name mcp-ynab-linux \
+            --repo ${{ github.repository }}
 
-          # Verify build succeeded
-          if [ ! -f "dist/mcp-ynab-linux" ]; then
-            echo "Error: Linux build failed - executable not found"
+          # Verify download
+          if [ ! -f "mcp-ynab-linux" ]; then
+            echo "Error: Failed to download Linux artifact"
             exit 1
           fi
 
-          # Check file size (should be ~100MB)
-          SIZE=$(stat -c%s "dist/mcp-ynab-linux" 2>/dev/null || stat -f%z "dist/mcp-ynab-linux")
-          echo "Linux executable size: $SIZE bytes"
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "Error: Linux executable is too small (less than 1MB)"
-            exit 1
-          fi
+          ls -lh mcp-ynab-linux
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-          # Rename with version
-          mv dist/mcp-ynab-linux "dist/mcp-ynab-linux-${{ steps.version.outputs.VERSION }}"
-          echo "Linux build complete: mcp-ynab-linux-${{ steps.version.outputs.VERSION }}"
-
-      - name: Build Windows executable
+      - name: Download Windows artifact
         run: |
-          echo "Building Windows executable..."
-          bun run build:windows
+          echo "Downloading Windows artifact from run ${{ steps.find-run.outputs.RUN_ID }}..."
+          gh run download ${{ steps.find-run.outputs.RUN_ID }} \
+            --name mcp-ynab-windows \
+            --repo ${{ github.repository }}
 
-          # Verify build succeeded
-          if [ ! -f "dist/mcp-ynab.exe" ]; then
-            echo "Error: Windows build failed - executable not found"
+          # Verify download
+          if [ ! -f "mcp-ynab.exe" ]; then
+            echo "Error: Failed to download Windows artifact"
             exit 1
           fi
 
-          # Check file size (should be ~100MB)
-          SIZE=$(stat -c%s "dist/mcp-ynab.exe" 2>/dev/null || stat -f%z "dist/mcp-ynab.exe")
-          echo "Windows executable size: $SIZE bytes"
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "Error: Windows executable is too small (less than 1MB)"
-            exit 1
-          fi
+          ls -lh mcp-ynab.exe
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-          # Rename with version
-          mv dist/mcp-ynab.exe "dist/mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe"
-          echo "Windows build complete: mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: executables-${{ steps.version.outputs.VERSION }}
-          path: |
-            dist/mcp-ynab-linux-${{ steps.version.outputs.VERSION }}
-            dist/mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: Build summary
+      - name: Upload assets to release
         run: |
-          echo "## Build Complete ✓" >> $GITHUB_STEP_SUMMARY
+          echo "Uploading assets to release ${{ github.event.release.tag_name }}..."
+
+          gh release upload ${{ github.event.release.tag_name }} \
+            mcp-ynab-linux \
+            mcp-ynab.exe \
+            --repo ${{ github.repository }} \
+            --clobber
+
+          echo "✓ Assets uploaded successfully"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Release summary
+        run: |
+          echo "## Release Assets Attached ✓" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version**: \`${{ steps.version.outputs.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Release**: ${{ github.event.release.tag_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: \`${{ steps.release.outputs.COMMIT_SHA }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Artifacts Built" >> $GITHUB_STEP_SUMMARY
-          echo "- Linux x64: \`mcp-ynab-linux-${{ steps.version.outputs.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Windows x64: \`mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe\`" >> $GITHUB_STEP_SUMMARY
+          echo "### Assets Uploaded" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mcp-ynab-linux\` - Linux x64 executable" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mcp-ynab.exe\` - Windows x64 executable" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "1. Download artifacts from this workflow run" >> $GITHUB_STEP_SUMMARY
-          echo "2. Test executables locally" >> $GITHUB_STEP_SUMMARY
-          echo "3. Create release manually:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "gh release create ${{ steps.version.outputs.VERSION }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  mcp-ynab-linux-${{ steps.version.outputs.VERSION }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --title \"Release ${{ steps.version.outputs.VERSION }}\" \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --notes \"Release notes here...\" \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --latest" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "View release: ${{ github.event.release.html_url }}" >> $GITHUB_STEP_SUMMARY

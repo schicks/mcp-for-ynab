@@ -1,0 +1,111 @@
+name: Build Executables
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ['**']  # Don't trigger on tag pushes to prevent loops
+
+concurrency:
+  group: build
+  cancel-in-progress: false  # Let builds finish
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # Read-only workflow
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Set build identifier
+        id: build
+        run: |
+          # Use short commit SHA as build identifier
+          BUILD_ID="${{ github.sha }}"
+          BUILD_SHORT="${BUILD_ID:0:7}"
+          echo "BUILD_ID=$BUILD_ID" >> $GITHUB_OUTPUT
+          echo "BUILD_SHORT=$BUILD_SHORT" >> $GITHUB_OUTPUT
+          echo "Build identifier: $BUILD_SHORT"
+
+      - name: Build Linux executable
+        run: |
+          echo "Building Linux executable..."
+          bun run build:linux
+
+          # Verify build succeeded
+          if [ ! -f "dist/mcp-ynab-linux" ]; then
+            echo "Error: Linux build failed - executable not found"
+            exit 1
+          fi
+
+          # Check file size (should be ~100MB)
+          SIZE=$(stat -c%s "dist/mcp-ynab-linux" 2>/dev/null || stat -f%z "dist/mcp-ynab-linux")
+          echo "Linux executable size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "Error: Linux executable is too small (less than 1MB)"
+            exit 1
+          fi
+
+          echo "Linux build complete"
+
+      - name: Build Windows executable
+        run: |
+          echo "Building Windows executable..."
+          bun run build:windows
+
+          # Verify build succeeded
+          if [ ! -f "dist/mcp-ynab.exe" ]; then
+            echo "Error: Windows build failed - executable not found"
+            exit 1
+          fi
+
+          # Check file size (should be ~100MB)
+          SIZE=$(stat -c%s "dist/mcp-ynab.exe" 2>/dev/null || stat -f%z "dist/mcp-ynab.exe")
+          echo "Windows executable size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "Error: Windows executable is too small (less than 1MB)"
+            exit 1
+          fi
+
+          echo "Windows build complete"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-ynab-linux
+          path: dist/mcp-ynab-linux
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-ynab-windows
+          path: dist/mcp-ynab.exe
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Build summary
+        run: |
+          echo "## Build Complete ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit**: \`${{ steps.build.outputs.BUILD_SHORT }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts Built" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mcp-ynab-linux\` - Linux x64 executable" >> $GITHUB_STEP_SUMMARY
+          echo "- \`mcp-ynab-windows\` - Windows x64 executable" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "To create a release, use the GitHub UI or:" >> $GITHUB_STEP_SUMMARY
+          echo "1. Create a new release with a tag (e.g., \`v1.0.0\`)" >> $GITHUB_STEP_SUMMARY
+          echo "2. The release workflow will automatically attach these artifacts" >> $GITHUB_STEP_SUMMARY
