@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(~/.bun/bin/bun install:*)"
+      "Bash(~/.bun/bin/bun install:*)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(git -C /workspaces/mcp-for-ynab tag -l)"
     ]
   }
 }

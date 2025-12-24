@@ -1,0 +1,149 @@
+name: Build Executables
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ['**']  # Don't trigger on tag pushes to prevent loops
+
+concurrency:
+  group: build
+  cancel-in-progress: false  # Let builds finish
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # Read-only workflow
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Generate version number
+        id: version
+        run: |
+          # Get current date in UTC (YYYY.MM.DD format)
+          DATE=$(date -u +%Y.%m.%d)
+          echo "DATE=$DATE" >> $GITHUB_OUTPUT
+
+          # Query GitHub API for existing releases matching today's date
+          # Use pagination to ensure we get all releases
+          MAX_BUILD=0
+          PAGE=1
+          while true; do
+            RELEASES=$(gh api "repos/${{ github.repository }}/releases?per_page=100&page=$PAGE" \
+              --jq ".[].tag_name | select(startswith(\"v$DATE\"))")
+
+            if [ -z "$RELEASES" ]; then
+              break
+            fi
+
+            # Extract build numbers and find max
+            while IFS= read -r release; do
+              if [ -n "$release" ]; then
+                BUILD_NUM=$(echo "$release" | sed "s/v$DATE\.//" || echo "0")
+                if [ "$BUILD_NUM" -gt "$MAX_BUILD" ] 2>/dev/null; then
+                  MAX_BUILD=$BUILD_NUM
+                fi
+              fi
+            done <<< "$RELEASES"
+
+            PAGE=$((PAGE + 1))
+          done
+
+          # Increment and create new version
+          BUILD=$((MAX_BUILD + 1))
+          VERSION="v$DATE.$BUILD"
+
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version: $VERSION"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build Linux executable
+        run: |
+          echo "Building Linux executable..."
+          bun run build:linux
+
+          # Verify build succeeded
+          if [ ! -f "dist/mcp-ynab-linux" ]; then
+            echo "Error: Linux build failed - executable not found"
+            exit 1
+          fi
+
+          # Check file size (should be ~100MB)
+          SIZE=$(stat -c%s "dist/mcp-ynab-linux" 2>/dev/null || stat -f%z "dist/mcp-ynab-linux")
+          echo "Linux executable size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "Error: Linux executable is too small (less than 1MB)"
+            exit 1
+          fi
+
+          # Rename with version
+          mv dist/mcp-ynab-linux "dist/mcp-ynab-linux-${{ steps.version.outputs.VERSION }}"
+          echo "Linux build complete: mcp-ynab-linux-${{ steps.version.outputs.VERSION }}"
+
+      - name: Build Windows executable
+        run: |
+          echo "Building Windows executable..."
+          bun run build:windows
+
+          # Verify build succeeded
+          if [ ! -f "dist/mcp-ynab.exe" ]; then
+            echo "Error: Windows build failed - executable not found"
+            exit 1
+          fi
+
+          # Check file size (should be ~100MB)
+          SIZE=$(stat -c%s "dist/mcp-ynab.exe" 2>/dev/null || stat -f%z "dist/mcp-ynab.exe")
+          echo "Windows executable size: $SIZE bytes"
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "Error: Windows executable is too small (less than 1MB)"
+            exit 1
+          fi
+
+          # Rename with version
+          mv dist/mcp-ynab.exe "dist/mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe"
+          echo "Windows build complete: mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: executables-${{ steps.version.outputs.VERSION }}
+          path: |
+            dist/mcp-ynab-linux-${{ steps.version.outputs.VERSION }}
+            dist/mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Build summary
+        run: |
+          echo "## Build Complete ✓" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: \`${{ steps.version.outputs.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts Built" >> $GITHUB_STEP_SUMMARY
+          echo "- Linux x64: \`mcp-ynab-linux-${{ steps.version.outputs.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Windows x64: \`mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download artifacts from this workflow run" >> $GITHUB_STEP_SUMMARY
+          echo "2. Test executables locally" >> $GITHUB_STEP_SUMMARY
+          echo "3. Create release manually:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "gh release create ${{ steps.version.outputs.VERSION }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  mcp-ynab-linux-${{ steps.version.outputs.VERSION }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  mcp-ynab-windows-${{ steps.version.outputs.VERSION }}.exe \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --title \"Release ${{ steps.version.outputs.VERSION }}\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --notes \"Release notes here...\" \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
