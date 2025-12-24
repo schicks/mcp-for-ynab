@@ -38,6 +38,9 @@ jobs:
           echo "Build identifier: $BUILD_SHORT"
 
       - name: Build Linux executable
+        env:
+          YNAB_CLIENT_ID: ${{ secrets.YNAB_CLIENT_ID }}
+          YNAB_CLIENT_SECRET: ${{ secrets.YNAB_CLIENT_SECRET }}
         run: |
           echo "Building Linux executable..."
           bun run build:linux
@@ -59,6 +62,9 @@ jobs:
           echo "Linux build complete"
 
       - name: Build Windows executable
+        env:
+          YNAB_CLIENT_ID: ${{ secrets.YNAB_CLIENT_ID }}
+          YNAB_CLIENT_SECRET: ${{ secrets.YNAB_CLIENT_SECRET }}
         run: |
           echo "Building Windows executable..."
           bun run build:windows
