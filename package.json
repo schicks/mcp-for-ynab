@@ -7,7 +7,10 @@
   "scripts": {
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy",
-    "build:worker": "echo 'Worker build handled by wrangler'"
+    "build:worker": "echo 'Worker build handled by wrangler'",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage"
   },
   "keywords": ["mcp", "ynab", "model-context-protocol", "budget", "api"],
   "author": "",
