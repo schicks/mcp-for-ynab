@@ -1,9 +1,12 @@
-import { TokenManager } from '../oauth/token-manager.ts';
+import { WorkerTokenManager } from '../oauth/worker-token-manager.js';
 
 export class YnabApiClient {
   private baseUrl = 'https://api.ynab.com/v1';
 
-  constructor(private tokenManager: TokenManager) {}
+  constructor(
+    private tokenManager: WorkerTokenManager,
+    private sessionId: string
+  ) {}
 
   async callApi(options: {
     method: string;
@@ -13,8 +16,20 @@ export class YnabApiClient {
   }): Promise<{ data?: unknown; error?: unknown }> {
     const { method, endpoint, body, headers = {} } = options;
 
-    // Get access token (will trigger auth if needed)
-    const accessToken = await this.tokenManager.getAccessToken();
+    // Get access token for this session
+    const accessToken = await this.tokenManager.getAccessToken(this.sessionId);
+
+    if (!accessToken) {
+      return {
+        error: {
+          error: {
+            id: 'unauthorized',
+            name: 'Unauthorized',
+            detail: 'Please authenticate by visiting /oauth/authorize with your session ID in the MCP-Session-Id header',
+          },
+        },
+      };
+    }
 
     // Build full URL
     const url = endpoint.startsWith('http')

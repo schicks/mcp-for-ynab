@@ -7,6 +7,7 @@ const AUTH_INITIATION_HTML = (authUrl: string) => `
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>YNAB Authorization</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
@@ -75,6 +76,7 @@ const SUCCESS_HTML = `
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>Authorization Successful</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
@@ -134,6 +136,7 @@ const ERROR_HTML = (error: string) => `
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
   <title>Authorization Failed</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
