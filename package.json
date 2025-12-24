@@ -3,14 +3,11 @@
   "version": "1.0.0",
   "description": "MCP server for YNAB API with OAuth authentication",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "src/worker.ts",
   "scripts": {
-    "dev": "bun run src/index.ts",
-    "build": "bun build --compile --minify --sourcemap src/index.ts --outfile dist/mcp-ynab",
-    "build:linux": "bun build --compile --target=bun-linux-x64 --minify src/index.ts --outfile dist/mcp-ynab-linux",
-    "build:macos": "bun build --compile --target=bun-darwin-arm64 --minify src/index.ts --outfile dist/mcp-ynab-macos",
-    "build:windows": "bun build --compile --target=bun-windows-x64 --minify src/index.ts --outfile dist/mcp-ynab.exe",
-    "build:all": "bun run build:linux && bun run build:macos && bun run build:windows"
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build:worker": "echo 'Worker build handled by wrangler'"
   },
   "keywords": ["mcp", "ynab", "model-context-protocol", "budget", "api"],
   "author": "",
@@ -20,6 +17,8 @@
     "zod": "^3.25.1"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "@types/bun": "latest",
+    "wrangler": "4"
   }
 }

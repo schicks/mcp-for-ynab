@@ -1,0 +1,20 @@
+name = "mcp-ynab-server"
+main = "src/worker.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "MCP_FOR_YNAB"
+id = "90af62ce27d64eb8aebd2378d3b436f1"
+preview_id = "812f79e2353d40e28f2ff54ae958877b"
+
+# Environment Variables (set via wrangler secret)
+# YNAB_CLIENT_ID - Set via: wrangler secret put YNAB_CLIENT_ID
+# YNAB_CLIENT_SECRET - Set via: wrangler secret put YNAB_CLIENT_SECRET
+# TOKEN_ENCRYPTION_KEY - Set via: wrangler secret put TOKEN_ENCRYPTION_KEY (generate with: openssl rand -hex 32)
+
+[build]
+command = "echo 'No build step required - Wrangler will bundle TypeScript automatically'"
+
+[limits]
+cpu_ms = 50  # Conservative limit for free tier
